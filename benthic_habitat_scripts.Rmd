@@ -20,17 +20,359 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # 1. Introduction
 
-This document is a step-by-step guide to create an `igraph` object starting from commonly available geodata. Here, an example is provided using data for the Ebro river (Spain), based on widely available geodata from HydroSHEDS and public repositories from the Hydrographic Confederation of the Ebro river [`CHE`](http://iber.chebro.es/geoportal/).
+This markdown document provides a tutorial to fit Species Distribution Models (SDMs) for benthic organisms in the Mediterranean Sea. Species Distribution Models are correlative methods that employ machine learning algorithms to infer the (realized) ecological niche of organism based on occurrence data and environmental covariates (predictors). For a review of SDMs, see Elith & Leathwick (2009) and Pichler & Hartig (2023). The algorithms, workflow, and an application are described in details in Baldan et al. (2024).
 
-The source code used to generate this tutorial is available on [github](https://github.com/damianobaldan/riverconn_tutorial) in the file `tutorial_network_creation.Rmd`; additional functions used in the tutorial are stored in the file `functions_network_creation.R`.
+In this document, models are fitted for _Posidonia oceanica_, a keystone species in the Mediterranean Sea. However, the workflow is general and can be implemented for any species. 
 
-After this tutorial is completed, the resulting  `igraph` object is meant to be used as input to functions to assess riverscape fragmentation. The `riverconn` package (available on [CRAN](https://cran.r-project.org/package=riverconn) and on [github](https://github.com/damianobaldan/riverconn)) allows for the calculation of many fragmentation/connectivity indices.  Most graph theory-based indices to asses fragmentation and connectivity of rivers (see Jumani et al., 2020 for a review) conceptualize the riverscape as a graph where vertices (nodes) represent reaches, i.e. distintictly separated river sections; while edges (links) represent splitting objects, such as confluences (where two reaches join), barriers (items that disrupt the longitudial connectivity of the river), or habitat patches boundaries (borders between sections of the river with relatively uniform habitat conditions). This tutorial focuses on barriers (dams), but in principle other fragmentation items can be dealt with similarly.
-
-The [`igraph`](https://cran.r-project.org/web/packages/igraph/index.html) package implements routines for graphs and network analysis. It can handle large graphs very well and provides functions for generating random and regular graphs, graph visualization, centrality methods and much more. The packages allows for easy [construction](https://igraph.org/r/doc/aaa-igraph-package.html) of `igraph` objects based on symbolic description of edges and vertices, edges and vertices lists, or adjacency matrices. The book [Statistical Analysis of Network Data with R by Kolaczyk and Csardi (2014)](https://link.springer.com/book/10.1007%2F978-3-030-44129-6) offers a comprehensive tutorial on the possibilities offered by the `igraph` package, including network data manipulation and visualization, descriptive analysis of network graphs, mathematical and statistical modeling of graphs, and network topology inference.
-
-# 1.1 Packages needed
+The source code used to generate this tutorial is available on [github](https://github.com/damianobaldan/benthic_habitat_scripts) in the file benthic_habitat_scripts.Rmd; additional functions used in the tutorial are stored in the file benthic_habitat_utility_funs.R.
 
 
+## 1.1 Modeling approach and algorithms
+
+The modeling approach used in this document is based on model ensembling, where several types of modeling algorithms are fitted to different subsets of data and a final ensemble model is then assembled based on the single model's performances. In this tutorial, four types of modeling algorithms with different complexitties (Pichler & Hartig, 2023) are used: 
+
+* Generalized Linear Models (GLM), 
+* Generalized Additive Models (GAM), 
+* Random Forest (RF), 
+* Artificial Neural Networks (ANN). 
+
+Additional dimensions of variability between the fitted models are the pseudoabsence data and the evaluation method: 
+
+* Since no independent evaluation dataset exists, cross validation has to be used to assess each model's performance. Here, 5-fold cross validation is used, and repeated three times with different randomized folds. A different strategy was used to assess the ensemble's performance, see below for more information.
+* Since no true absence data are available, an algorithm was used to randomly generate pseudo-absences (P-abs). The procedure was repeated three times to generate three P-abs sets used to fit the models. 
+
+In conclusion, a total number of: 4 (modeling algorithms) X 5 (cross-validation folds) X 3 (cross-validation repetitions) X 3 (P-abs datasets) = 180 models were fitted and used for the ensemble generation.
+
+
+## 1.2 Dependencies
+
+This tutorial used the `biomod2` package (Thuiller et al., 2009) to fit and evaluate SDMS. Few other libraries are needed: `terra` and for raster data and `sf` for shapefile data manipulation, `spatstat` for spatial analyses needed for P-abs processing, `ecospat` for model's performances (Boyce's index), `cluster` and `NMOF` for the ensemble evaluation, `ggdendro` and `ggtext` for plotting the predictors dendrogram, `usdm` for the Variance Inflation Factor analysis function, `viridis` for nice palettes for plotting.
+
+Some custom functions are also used and are stored in the file benthic_habitat_utility_funs.R. In particular, the function `make_blocks` was developed by Philipp Brun and used in the Brun et al. (2020) paper. If this function is used, the Brun (2020) paper must be cited.   
+
+```{r packages, results='hide', message=FALSE, warning=FALSE} 
+library(terra)
+library(sf)
+library(tidyverse)
+library(biomod2)
+library(tidyterra)
+library(spatstat)
+library(ecospat)
+library(cluster)
+library(NMOF)
+library(ggdendro)
+library(ggtext)
+library(usdm)
+library(viridis)
+library(tidyterra)
+
+source("benthic_habitat_utility_funs.R")
+
+```
+
+
+# 2. Input Data
+
+We use occurrence data retrieved from the literature, and assembled a large number of layers of environmental covariates. 
+
+## 2.1 Environmental Covariates Layers 
+
+Most of the environmental predictors used to fit SDMs were obtained from the re-analysis of the Mediterranean Sea physics (Escudier et al. 2020, 2021), biogeochemistry (Cossarini et al. 2021; Teruzzi et al. 2021) and sea waves (Korres et al. 2021) provided by the Copernicus Marine Service ([CMS](https://marine.copernicus.eu/); Le Traon et al. 2019). The physics and biogeochemistry re-analysis products have a resolution of ~4.5×4.5 km and 125 unevenly spaced active vertical layers (thickness ranging between 2 and 100 m, increasing with depth). Data with a monthly resolution for the period 2000–2020 were downloaded. The extracted physical variables included sea water velocity (Vm), potential temperature (T) and salinity concentration (SAL). The extracted biogeochemical variables included pH (pH), concentrations of ammonium (NH4), nitrate (NO3), phosphate (PO4), dissolved oxygen (O2), chlorophyll (CHL) and phytoplankton expressed as carbon (PHY). The extracted sea waves variables included the wave significant height (VHM0) and the wave mean period from variance spectral density second frequency moment (VTM02). For all physical and biogeochemical variables, the physicochemical conditions of the vertical layer just above sea bottom were considered. Finally, for all variables, the cell by cell median, maximum, minimum and range of their physicochemical conditions over the 240 monthly maps covering the 20-year period were computed and used as predictors for the models. Additionally, the high-resolution [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) bathymetric map (0.5×0.5 km; Weatherall et al. 2015) was used to calculate the average depth (DEPTH) and slope (SLOPE) of each 4.5×4.5 km grid cell. Finally, we retained only the fraction of the Mediterranean corresponding to a depth shallower than 40 m, as _Posidonia oceanica_ only inhabits coastal regions.
+
+```{r read and plot predictors, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+myExpl <- "input_data/predictors.tif" %>% terra::rast()
+
+myExpl
+
+plot(myExpl)
+
+```
+
+## 2.2 Environmental Covariates Correlation Analysis 
+
+Some correlative methods perform poorly when correlated predictors are used. To retain a parsimonious subset of predictors for fitting the model and avoid overfitting, we performed a hierarchical cluster analysis based on a distance matrix, where we used 1 minus the absolute value of Spearman's correlation coefficient (1−|r|) as a measure of predictor's dissimilarity. We used the threshold of r = 0.7 to identify 17 clusters of predictors and retained one predictor for each cluster. 
+
+```{r predictors dendrogram, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Calculate correlation between raster stack layers
+funcor = function(x,y){cor(x,y, method = "spearman", use = "complete.obs")}
+env_corr <- layerCor(myExpl, fun = funcor)
+rownames(env_corr) <- colnames(env_corr) <- names(myExpl)
+
+# Perform hierarchic clustering
+dissimilarity = 1 - abs(env_corr)
+distance <- as.dist(dissimilarity) 
+tree <- hclust(distance, "average")
+
+# For plotting: cut dendrogram where spearman = 0.7
+ct <- cutree(tree, h = 1- 0.7)
+split(names(ct), ct)
+clust.df <- data.frame(label=names(ct), cluster=factor(ct))
+
+# For plotting: generate dendrogram labels
+tree_data <- dendro_data(tree)
+labs <- label(tree_data) %>% 
+  left_join(clust.df) %>% 
+  dplyr::mutate(label2 = paste0(label, " (cluster ",cluster,")"))
+
+# For plotting: diplay cuts at different correlation levels
+df_cuts <- data.frame("cut" = c(0.5, 0.7, 0.9)) %>%
+  mutate(label = paste0("r = ", cut))
+
+
+# Dendrogram plot
+ggplot(segment(tree_data)) +
+  geom_segment(aes(x=x, y=y, xend=xend, yend=yend)) +
+  geom_richtext(data=labs,
+            aes(label=label2, x=x, y=0, colour=cluster), hjust = 0,
+            fill = NA, label.color = NA) +
+  theme_dendro() + 
+  coord_flip() +
+  scale_y_reverse(limits = c(1, -1)) + 
+  geom_hline(data = df_cuts, aes(yintercept = 1 - cut, linetype = label) ) + 
+  scale_linetype_discrete(name = "Tree depth") +
+  guides(color="none") + 
+  theme(axis.text.x = element_markdown() )
+
+```
+
+Finally, the Variance Inflation Factor (VIF) was used to identify potentially collinear predictors. 
+
+```{r predictors vif, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Check vifstep
+myExpl %>% 
+  dplyr::select(
+   no3_median,
+   po4_median,
+   chl_median,
+   thetao_min,
+   gebco_mean_slope,
+   thetao_median,
+   so_median,
+   o2_median,
+   ph_median,
+   whm0_median,
+   vm_median,
+   gebco_mean_depth
+   ) %>%
+  usdm::vifstep()
+
+```
+
+The procedure resulted in a short list of 12 uncorrelated and non-collinear predictors which were used as covariates in the modeling procedure.
+
+```{r predictors subselection, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Check vifstep
+myExpl <- myExpl %>% 
+  dplyr::select(
+   no3_median,
+   po4_median,
+   chl_median,
+   thetao_min,
+   gebco_mean_slope,
+   thetao_median,
+   so_median,
+   o2_median,
+   ph_median,
+   whm0_median,
+   vm_median,
+   gebco_mean_depth
+   )
+
+```
+
+
+## 2.3 Occurrence Data
+
+Occurrence points for _P. oceanica_ were retrieved from Chefaoui et al. (2017). The datasets contains 1140 georeferenced points. Considering the spatial resolution of CMS Mediterranean products, occurrences were pre-processed by retaining only one occurrence point per 4.5×4.5 km grid cell, resulting in 640 points used to fit the models. This procedure is referred to as rarefaction or thinning and is widely used to solve fine-scale autocorrelation in the data. Several libraries in R implement functions to perform this operation, for example the package `GeoThinneR`.
+
+```{r read plot occurrences, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Check vifstep
+DataSpecies <- "input_data/Posidonia_oceanica_paper___snap.shp" %>%
+  st_read(quiet = TRUE)
+
+DataSpecies
+
+# Plot data
+ggplot() +
+  theme_minimal()+
+  ggspatial::layer_spatial(myExpl$thetao_median, alpha = 0.5) +
+  scale_fill_viridis(na.value = NA,  name = "Tmedian" ) + 
+  theme( legend.position = "bottom") + 
+  geom_sf(data = DataSpecies, shape = 4)
+
+```
+
+# 3. Modeling Workflow
+
+Some minor data pre-processing before starting. `biomod2` needs as input a matrix with coordinates and a vector with responsed (in this case, only occurrences are used, so the vector contains only ones).
+
+```{r models setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+  # Name of the species to model - for saving outputs
+  species_name <- "posidonia"
+  
+  # Create matrix with xy position
+  dataXY <- DataSpecies %>% st_coordinates()
+  
+  # Vector with 1 for presences
+  dataResp <- rep(1, nrow(dataXY))
+
+```
+
+## 3.1 Pseudo-absences Generation
+
+Due to the lack of true absence data to fit the models, occurrence and pseudo-absence (P-Abs) were used. Two different sampling strategies to generate our P-Abs were used: ‘density dependent' and ‘environmentally stratified’.
+
+### 3.1.1 Density Dependent P-abs
+
+Occurrences data have a strong sampling bias towards the north-western part of the Mediterranean. To correct this bias, P-Abs were inferred based on the kernel smoothing intensity of all occurrence points (functions `rSSI` and `density.ppp` in the `spatstat` package, setting the smoothing bandwidth parameter to 3. This method generates a higher density of P-Abs closer to species observations, mimicking the same sampling effort distribution (Descombes et al. 2022; Righetti et al. 2019).
+
+For this step first a kernel density is calculated using the function `spatstat.explore::density.ppp`. A value of `sigma = 1` is set to control the smoothness of the kernel density (the density should net be too smooth or too rugged).
+
+```{r density pabs setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Create a mask that will be used for kernel density estimtate in spatstat
+mask <- myExpl$thetao_median > 0
+mask_df <- terra::as.data.frame(mask, na.rm = TRUE, xy=TRUE)
+
+# Spatial window for the point pattern object
+owin_obs <- owin(mask = mask_df)
+
+# Create a point pattern object
+ppp_obs <- ppp(dataXY[,1], dataXY[,2], window = owin_obs )
+ppp_obs
+
+# Calculate points density
+density_obs <- spatstat.explore::density.ppp(ppp_obs, positive = TRUE, diggle = TRUE, sigma = 1)
+
+# Check density_obs summary
+summary(density_obs)
+
+# Plot density 
+plot(density_obs, main = "Kernel density estimate" )
+
+# Plot density histogram
+hist(density_obs, main = "Density histogram")
+
+```
+
+P-abs are sampled based on the geographic distribution of the kernel density estimate. Here, n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). To sample P-abs, the function `spatstat.random::rpoispp` is used. This function by defaults returns the realization of a point process with the same intensity defined in the `lambda` argument. Thus the estimated density is scaled to have the expected number of P-abs returned. The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
+
+```{r density pabs generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Decide number of density dependent pseudoabsences
+n_pa_dens <- 500
+
+# Adjust dentisy
+adjust <- n_pa_dens / ppp_obs$n
+
+# Sample pseudoabsences based on occurrences density kernel
+PA1_dens <- rpoispp(density_obs*adjust)
+PA2_dens <- rpoispp(density_obs*adjust)
+PA3_dens <- rpoispp(density_obs*adjust)
+
+# Transform to sf object
+PA_dens_sf <- rbind(
+  data.frame(x = PA1_dens$x, y = PA1_dens$y) %>% mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE),
+  data.frame(x = PA2_dens$x, y = PA2_dens$y) %>% mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
+  data.frame(x = PA3_dens$x, y = PA3_dens$y) %>% mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
+  ) %>%
+  st_as_sf(coords = c(1,2), crs = crs(DataSpecies))
+
+# Plot PA1 
+plot(PA_dens_sf[PA_dens_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Density dependent PA1 set")
+
+```
+
+### 3.1.2 Environmentally Stratified P-abs
+
+This P-abs set was generated based on a stratified sub-division of the environmental range. For this, classified the median temperature and salinity predictor layers were reclassified into three bins (splitting data at the 0.3 and 0.6 quantiles) of continuous values, re-grouped them into unique classes of temperature and salinity (n = 9 classes) and sampled an equal number of P-Abs for each combination. This method guarantees that all environmental strata were represented in the training dataset and reduces extrapolation errors at the edge of the species' environmental niche (Da Re et al. 2023; Descombes et al. 2022). 
+
+```{r stratified pabs setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Number of stratified P-abs 
+n_pa_env <- 500
+
+# Create reclassified spatraster
+myExpl_class <- myExpl
+
+# reclassify each layer (function not vectorized -.-')
+breaks <- global(myExpl_class, quantile, probs=c(0, 0.33, 0.66, 1), na.rm=TRUE) %>% as.matrix()
+
+for (n in 1:length(names(myExpl_class))){
+  myExpl_class[[n]] <- classify(myExpl_class[[n]], rcl = as.vector(breaks[n,]), include.lowest=FALSE, brackets=TRUE )
+}
+
+# Create unique classification
+myExpl_class$comb <- myExpl_class$thetao_median + 10 * myExpl_class$so_median
+myExpl_class$comb <- as.factor(myExpl_class$comb)
+
+# Check in plot
+plot(myExpl_class$comb, main = "Environmental strata")
+
+```
+
+P-abs are sampled using the custom function `stratified_pp_sampler_area`. This function samples an uniform point process for each environmental strata, where the number of P-abs per strata is proportional to its area. Here, n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
+
+```{r stratified pabs generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Sample environmentally stratified pseudoabsences
+PA1_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
+PA2_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
+PA3_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
+
+# transform to sf object
+PA_env_sf <- rbind(
+  data.frame(x = PA1_env[,1], y = PA1_env[,2]) %>% mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE), 
+  data.frame(x = PA2_env[,1], y = PA2_env[,2]) %>% mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
+  data.frame(x = PA3_env[,1], y = PA3_env[,2]) %>% mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
+) %>%
+  st_as_sf(coords = c(1,2), crs = crs(DataSpecies))
+
+# Check with a plot
+plot(PA_env_sf[PA_env_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Environmentally stratified PA1 set")
+
+```
+
+### 3.1.3 P-abs dataset generation
+
+The data.frames with P-abs generated in the previous steps are merged and formatted in a biomod-friendly way that will be useful later. An `sf` object is also created, which hwill be useful for plotting.
+
+```{r pabs dataset generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+
+# Merge the two p-abs data.frames
+PA_full <- rbind(
+  st_coordinates(PA_dens_sf) %>% data.frame() ,
+  st_coordinates(PA_env_sf) %>% data.frame())
+
+PA_TF_table <- rbind(
+  st_drop_geometry(PA_dens_sf) %>% dplyr::select(PA1, PA2, PA3) ,
+  st_drop_geometry(PA_env_sf) %>% dplyr::select(PA1, PA2, PA3) )
+
+# Join the information with occurrences to generate the full dataset used to train/evaluate the models
+resp <- c(dataResp, rep(NA, nrow(PA_full) ) )
+respXY <- rbind(dataXY, data.frame(X = PA_full$X, Y = PA_full$Y))
+
+# Create biomod-friendly data
+ PA.user.table <- rbind( 
+   data.frame(PA1 = rep(TRUE, length(dataResp)),
+              PA2 = rep(TRUE, length(dataResp)),
+              PA3 = rep(TRUE, length(dataResp))),
+   PA_TF_table
+   )
+
+# Create data frame for creating cross validation folds
+ PA.user.table_sf <- st_as_sf(
+   data.frame(respXY, "resp" = ifelse(is.na(resp), 0, 1), PA.user.table ),
+   coords = c("X", "Y"),
+   crs = crs(my_Expl))
+
+
+```
 
 
 
@@ -39,11 +381,47 @@ The [`igraph`](https://cran.r-project.org/web/packages/igraph/index.html) packag
 
 
 
+## 3.2 Spatial Blocks for Models Evaluation
+
+Then, a spatial block approach was used to split all the data (occurrences and P-abs) in a training (80 %) and evaluation (20 %) datasets. This procedure is needed because no independent evaluation dataset is available. The spatial blocks ensure that training and evaluation data are spatially distinct as much as possible, this testing the ensemble's ability to generalize over different geographic area. Spatial clusters were defined using a k-medoid approach (`cluster::pam` function: see Brun et al. 2020 for details on the method). The function `make_blocks` was developed by Philipp Brun and used in the Brun et al. (2020) paper. If this function is used, the Brun et al. (2020) paper must be cited.
 
 
 
 
 
+## 3.3 Models Calibration
+
+
+
+## 3.4 Models Evaluation and Ensembling
+
+
+
+## 3.5 Models Projection 
+
+
+
+## 4. Conclusions
+
+
+
+# References
+
+Elith, J., & Leathwick, J. R. (2009). Species distribution models: ecological explanation and prediction across space and time. Annual review of ecology, evolution, and systematics, 40(1), 677-697.
+
+Pichler, M., & Hartig, F. (2023). Machine learning and deep learning—A review for ecologists. Methods in Ecology and Evolution, 14(4), 994-1016.
+
+Baldan, D., Chauvier‐Mendes, Y., Gianni, F., Cossarini, G., & Bandelj, V. (2024). Identifying Gaps in the Protection of Mediterranean Seagrass Habitats Using Network‐Based Prioritisation. Diversity and Distributions, 30(11), e13922.
+
+Thuiller, W., Lafourcade, B., Engler, R., & Araújo, M. B. (2009). BIOMOD–a platform for ensemble forecasting of species distributions. Ecography, 32(3), 369-373.
+
+Descombes, P., Chauvier, Y., Brun, P., Righetti, D., Wüest, R. O., Karger, D. N., ... & Zimmermann, N. E. (2022). Strategies for sampling pseudo-absences for species distribution models in complex mountainous terrain. BioRxiv, 2022-03.
+
+Righetti, D., Vogt, M., Gruber, N., Psomas, A., & Zimmermann, N. E. (2019). Global pattern of phytoplankton diversity driven by temperature and environmental variability. Science advances, 5(5), eaau6253.
+
+Da Re, D., Tordoni, E., Lenoir, J., Lembrechts, J. J., Vanwambeke, S. O., Rocchini, D., & Bazzichetto, M. (2023). USE it: Uniformly sampling pseudo‐absences within the environmental space for applications in habitat suitability models. Methods in Ecology and Evolution, 14(11), 2873-2887.
+
+Brun, P., Thuiller, W., Chauvier, Y., Pellissier, L., Wüest, R. O., Wang, Z., & Zimmermann, N. E. (2020). Model complexity affects species distribution projections under climate change. Journal of Biogeography, 47(1), 130-142.
 
 
 
