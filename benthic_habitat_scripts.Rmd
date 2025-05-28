@@ -26,7 +26,6 @@ In this document, models are fitted for _Posidonia oceanica_, a keystone species
 
 The source code used to generate this tutorial is available on [github](https://github.com/damianobaldan/benthic_habitat_scripts) in the file benthic_habitat_scripts.Rmd; additional functions used in the tutorial are stored in the file benthic_habitat_utility_funs.R.
 
-
 ## 1.1 Modeling approach and algorithms
 
 The modeling approach used in this document is based on model ensembling, where several types of modeling algorithms are fitted to different subsets of data and a final ensemble model is then assembled based on the single model's performances. In this tutorial, four types of modeling algorithms with different complexitties (Pichler & Hartig, 2023) are used: 
@@ -706,6 +705,7 @@ ggplot() +
   theme(title = element_markdown())
 
 ```
+
 # 4. Conclusions
 
 The implemented workflow is general and can be used for different species in different geographic context with little modifications.
