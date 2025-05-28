@@ -73,11 +73,11 @@ source("benthic_habitat_utility_funs.R")
 
 # 2. Input Data
 
-We use occurrence data retrieved from the literature, and assembled a large number of layers of environmental covariates. 
+Occurrence data retrieved from the literature are used as respinse. A large number of layers of environmental covariates to be used as predictors was also assembled. 
 
 ## 2.1 Environmental Covariates Layers 
 
-Most of the environmental predictors used to fit SDMs were obtained from the re-analysis of the Mediterranean Sea physics (Escudier et al. 2020, 2021), biogeochemistry (Cossarini et al. 2021; Teruzzi et al. 2021) and sea waves (Korres et al. 2021) provided by the Copernicus Marine Service ([CMS](https://marine.copernicus.eu/); Le Traon et al. 2019). The physics and biogeochemistry re-analysis products have a resolution of ~4.5×4.5 km and 125 unevenly spaced active vertical layers (thickness ranging between 2 and 100 m, increasing with depth). Data with a monthly resolution for the period 2000–2020 were downloaded. The extracted physical variables included sea water velocity (Vm), potential temperature (T) and salinity concentration (SAL). The extracted biogeochemical variables included pH (pH), concentrations of ammonium (NH4), nitrate (NO3), phosphate (PO4), dissolved oxygen (O2), chlorophyll (CHL) and phytoplankton expressed as carbon (PHY). The extracted sea waves variables included the wave significant height (VHM0) and the wave mean period from variance spectral density second frequency moment (VTM02). For all physical and biogeochemical variables, the physicochemical conditions of the vertical layer just above sea bottom were considered. Finally, for all variables, the cell by cell median, maximum, minimum and range of their physicochemical conditions over the 240 monthly maps covering the 20-year period were computed and used as predictors for the models. Additionally, the high-resolution [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) bathymetric map (0.5×0.5 km; Weatherall et al. 2015) was used to calculate the average depth (DEPTH) and slope (SLOPE) of each 4.5×4.5 km grid cell. Finally, we retained only the fraction of the Mediterranean corresponding to a depth shallower than 40 m, as _Posidonia oceanica_ only inhabits coastal regions.
+Most of the environmental predictors used to fit SDMs were obtained from the re-analysis of the Mediterranean Sea physics (Escudier et al. 2020, 2021), biogeochemistry (Cossarini et al. 2021; Teruzzi et al. 2021) and sea waves (Korres et al. 2021) provided by the Copernicus Marine Service ([CMS](https://marine.copernicus.eu/); Le Traon et al. 2019). The physics and biogeochemistry re-analysis products have a resolution of ~4.5×4.5 km and 125 unevenly spaced active vertical layers (thickness ranging between 2 and 100 m, increasing with depth). Data with a monthly resolution for the period 2000–2020 were downloaded. The extracted physical variables included sea water velocity (vm), potential temperature (thetao) and salinity concentration (sal). The extracted biogeochemical variables included pH (ph), concentrations of ammonium (nh4), nitrate (no3), phosphate (po4), dissolved oxygen (o2), chlorophyll (chla) and phytoplankton expressed as carbon (phy). The extracted sea waves variables included the wave significant height (whm0) and the wave mean period from variance spectral density second frequency moment (vtm02). For all physical and biogeochemical variables, the physicochemical conditions of the vertical layer just above sea bottom were considered. Finally, for all variables, the cell by cell median, maximum, minimum and range of their physicochemical conditions over the 240 monthly maps covering the 20-year period were computed and used as predictors for the models. Additionally, the high-resolution [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) bathymetric map (0.5×0.5 km; Weatherall et al. 2015) was used to calculate the average depth (gebco_mean_depth) and slope (gebco_mean_slope) of each 4.5×4.5 km grid cell. Finally, we retained only the fraction of the Mediterranean corresponding to a depth shallower than 40 m, as _Posidonia oceanica_ only inhabits coastal regions.
 
 ```{r read and plot predictors, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 myExpl <- "input_data/predictors.tif" %>% terra::rast()
@@ -90,7 +90,7 @@ plot(myExpl)
 
 ## 2.2 Environmental Covariates Correlation Analysis 
 
-Some correlative methods perform poorly when correlated predictors are used. To retain a parsimonious subset of predictors for fitting the model and avoid overfitting, we performed a hierarchical cluster analysis based on a distance matrix, where we used 1 minus the absolute value of Spearman's correlation coefficient (1−|r|) as a measure of predictor's dissimilarity. We used the threshold of r = 0.7 to identify 17 clusters of predictors and retained one predictor for each cluster. 
+Some correlative methods perform poorly when correlated predictors are used. To retain a parsimonious subset of predictors for fitting the model and avoid overfitting, a hierarchical cluster analysis based on a distance matrix was performed, where 1 minus the absolute value of Spearman's correlation coefficient (1−|r|) was used as a measure of predictor's dissimilarity. The threshold of r = 0.7 was used to identify 17 clusters of predictors and retained one predictor for each cluster. 
 
 ```{r predictors dendrogram, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Calculate correlation between raster stack layers
@@ -135,7 +135,7 @@ ggplot(segment(tree_data)) +
 
 ```
 
-Finally, the Variance Inflation Factor (VIF) was used to identify potentially collinear predictors. 
+Finally, the Variance Inflation Factor (VIF, function `usdm::vifstep`) was used to identify potentially collinear predictors. 
 
 ```{r predictors vif, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Check vifstep
@@ -220,11 +220,11 @@ dataResp <- rep(1, nrow(dataXY))
 
 ## 3.1 Pseudo-absences Generation
 
-Due to the lack of true absence data to fit the models, occurrence and pseudo-absence (P-Abs) were used. Two different sampling strategies to generate our P-Abs were used: ‘density dependent' and ‘environmentally stratified’.
+Due to the lack of true absence data to fit the models, occurrence and pseudo-absence (P-Abs) are used. Two different sampling strategies to generate our P-Abs are used: ‘density dependent' and ‘environmentally stratified’.
 
 ### 3.1.1 Density Dependent P-abs
 
-Occurrences data have a strong sampling bias towards the north-western part of the Mediterranean. To correct this bias, P-Abs were inferred based on the kernel smoothing intensity of all occurrence points (functions `rSSI` and `density.ppp` in the `spatstat` package, setting the smoothing bandwidth parameter to 3. This method generates a higher density of P-Abs closer to species observations, mimicking the same sampling effort distribution (Descombes et al. 2022; Righetti et al. 2019).
+Occurrences data have a strong sampling bias towards the north-western part of the Mediterranean. To correct this bias, P-Abs are inferred based on the kernel smoothing intensity of all occurrence points (functions `rSSI` and `density.ppp` in the `spatstat` package, setting the smoothing bandwidth parameter to 3. This method generates a higher density of P-Abs closer to species observations, mimicking the same sampling effort distribution (Descombes et al. 2022; Righetti et al. 2019).
 
 For this step first a kernel density is calculated using the function `spatstat.explore::density.ppp`. A value of `sigma = 1` is set to control the smoothness of the kernel density (the density should net be too smooth or too rugged).
 
@@ -287,7 +287,7 @@ plot(PA_dens_sf[PA_dens_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Density depen
 
 ### 3.1.2 Environmentally Stratified P-abs
 
-This P-abs set was generated based on a stratified sub-division of the environmental range. For this, classified the median temperature and salinity predictor layers were reclassified into three bins (splitting data at the 0.3 and 0.6 quantiles) of continuous values, re-grouped them into unique classes of temperature and salinity (n = 9 classes) and sampled an equal number of P-Abs for each combination. This method guarantees that all environmental strata were represented in the training dataset and reduces extrapolation errors at the edge of the species' environmental niche (Da Re et al. 2023; Descombes et al. 2022). 
+The environmentally stratified P-abs set is generated based on a stratified sub-division of the environmental range. For this, classified the median temperature and salinity predictor layers are reclassified into three bins (splitting data at the 0.3 and 0.6 quantiles) of continuous values, re-grouped into unique classes of temperature and salinity (n = 9 classes). Then, an equal number of P-Abs for each combination is sampled for each class. This method guarantees that all environmental strata are represented in the training dataset and reduces extrapolation errors at the edge of the species' environmental niche (Da Re et al. 2023; Descombes et al. 2022). 
 
 ```{r stratified pabs setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Number of stratified P-abs 
@@ -316,7 +316,7 @@ plot(myExpl_class$comb, main = "Environmental strata")
 
 ```
 
-P-abs are sampled using the custom function `stratified_pp_sampler_area`. This function samples an uniform point process for each environmental strata, where the number of P-abs per strata is proportional to its area. Here, n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
+Here, envrionemntally stratified P-abs are sampled using the custom function `stratified_pp_sampler_area`. This function samples an uniform point process for each environmental strata, where the number of P-abs per strata is proportional to its area. n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
 
 ```{r stratified pabs generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Sample environmentally stratified pseudoabsences
@@ -378,9 +378,9 @@ PA.user.table_sf <- st_as_sf(
 
 ## 3.2 Spatial Blocks for Models Evaluation
 
-Then, a spatial block approach was used to split all the data (occurrences and P-abs) in a training (80 %) and evaluation (20 %) datasets. This procedure is needed because no independent evaluation dataset is available. The spatial blocks ensure that training and evaluation data are spatially distinct as much as possible, this testing the ensemble's ability to generalize over different geographic area. Spatial clusters were defined using a k-medoid approach (`cluster::pam` function: see Brun et al. 2020 for details on the method). The function `make_blocks` was developed by Philipp Brun and used in the Brun et al. (2020) paper. If this function is used, the Brun et al. (2020) paper must be cited.
+Then, a spatial block approach is used to split all the data (occurrences and P-abs) in a training (80 %) and evaluation (20 %) datasets. This procedure is needed because no independent evaluation dataset is available. The spatial blocks ensure that training and evaluation data are spatially distinct as much as possible, this testing the ensemble's ability to generalize over different geographic area. Spatial clusters are created using a k-medoid approach (`cluster::pam` function: see Brun et al. 2020 for details on the method). The function `make_blocks` was developed by Philipp Brun and used in the Brun et al. (2020) paper. If this function is used, the Brun et al. (2020) paper must be cited.
 
-Here, the aim is to split the data into a training and evaluation datasets. Therefore, 5 folds are generated (`cv_param_nstrat`), one of them (fold with the smaller occurrence/P-abs ratio) will be assigned to the evaluation set and the four remaining to the training set. Each fold can contain points from 2 geographic clusters (`cv_param_nclusters`). 
+Here, the aim is to split the data into a training and evaluation datasets. Therefore, 5 folds are generated (`cv_param_nstrat`), one of them (fold with the smaller occurrence/P-abs ratio) is assigned to the evaluation set and the four remaining to the training set. Each fold can contain points from 2 geographic clusters (`cv_param_nclusters`). Clustered occurrence and P-abs points can be mapped to be visually inspected.
 
 ```{r spatial blocks definition, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Number of folds to create
@@ -456,17 +456,18 @@ myBiomodData <- BIOMOD_FormatingData(
   dir.name = "models")
 
 # Plot formatted data
-plot(myBiomodData)
+plot(myBiomodData) + 
+  theme_minimal()
 
 ```
 
 ## 3.3 Models Calibration
 
-The models parametrization needs to be determined. Model's hyperparameters can affect the fitting capacity of the models and their ability to perform well when extrapolating to un-sampled environmental conditions. Here, intermediate complexity models were fitted to balance the fitting capacity with the ability to extrapolate to un-sampled environmental conditions, that is, to prevent overfitting. The guidelines in Brun et al. (2020) were followed. The custom options are: 
- * GLMs were fitted with linear and quadratic terms;
- * GAMs were fitted with a regularisation in the smooth term set to 3;
- * RFs was fitted with a minimum size of terminal nodes set to 40 and 1000 trees;
- * ANNs were fitted with 3 hidden layers and a decay of 0.1.
+The models parametrization needs to be determined. Model's hyperparameters can affect the fitting capacity of the models and their ability to perform well when extrapolating to un-sampled environmental conditions. Here, intermediate complexity models are fitted to balance the fitting capacity with the ability to extrapolate to un-sampled environmental conditions, that is, to prevent overfitting. The guidelines in Brun et al. (2020) are followed. The custom options are: 
+ * GLMs are fitted with linear and quadratic terms;
+ * GAMs are fitted with a regularisation in the smooth term set to 3;
+ * RFs are fitted with a minimum size of terminal nodes set to 40 and 1000 trees;
+ * ANNs are fitted with 3 hidden layers and a decay of 0.1.
 
 ```{r models parametrization, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Define options for single models
@@ -541,9 +542,9 @@ The models parametrization needs to be determined. Model's hyperparameters can a
   )
 
 ```
-The models were fitted using the function `biomod2::BIOMOD_Modeling`. Few options were specified here. In particular, the 5-fold cross validation was specified by setting `CV.strategy = "kfold"`, `CV.nb.rep = 3`, and `CV.k = 5`. The `biomod2` default setting of equal prevalence to presences and P-Abs was set with `prevalence = 0.5` (i.e., the sum of the presences weights equals the sum of P-Abs weights). This way, the influence of P-Abs in the calibration of each single model was kept constant, regardless of the number of presence points used for fitting.
+The models are fitted using the function `biomod2::BIOMOD_Modeling`. Few options are specified in this function In particular, the 5-fold cross validation is specified by setting `CV.strategy = "kfold"`, `CV.nb.rep = 3`, and `CV.k = 5`. The `biomod2` default setting of equal prevalence to presences and P-Abs is set with `prevalence = 0.5` (i.e., the sum of the presences weights equals the sum of P-Abs weights). This way, the influence of P-Abs in the calibration of each single model is kept constant, regardless of the number of presence points used for fitting (useful when several species with different number of occurrences are fitted for instance in a loop).
 
-The procedure to calculate the variable importance was set to be repeated 3 times (`var.import = 3`). The algorithm calculates the importance of predictors in the models and in the ensemble using a permutation approach. Following this method, each predictor is randomly permuted one at a time and model predictions made accordingly. Each prediction is then compared with and without permutation using Pearson's correlation coefficient (ρ). Predictor importance was determined as 1−|ρ|. This process is repeated three times for each predictor, and the average variable importance is considered.
+The procedure to calculate the variable importance is set to be repeated 3 times (`var.import = 3`). The algorithm calculates the importance of predictors in the models and in the ensemble using a permutation approach. Following this method, each predictor is randomly permuted one at a time and model predictions made accordingly. Each prediction is then compared with and without permutation using Pearson's correlation coefficient (ρ). Predictor importance was determined as 1−|ρ|. This process is repeated three times for each predictor, and the average variable importance is considered.
 
 Another relevant argument is the evaluation metric (`metric.eval`). Here, four metrics are selected: the Area Under the Receiving Operating Curce (ROC), the Cohen's K (KAPPA), the Boyce's Index (BOYCE), and the True Skill Statistics (TSS). AUC, TSS, and KAPPA are widely used to assess the performance of classification algorithms. The Boyce's index is a presence only index and checks weather the model's output in terms of probability of occurrence (also known as Habitat Suitability Index) has higher values in correspondence of occurrence points (Hierzel et al., 2006)
 
@@ -581,7 +582,7 @@ get_evaluations(myBiomodModelOut) %>%
 
 ## 3.5 Models Ensembling
 
-The ensemble is calculated by weight averaging the models based on their AUC score (function `biomod2::BIOMOD_EnsembleModeling`). First, models with low performances (AUC < 0.7, `metric.select.thresh` agument) are removed. Then, a weighted mean of models is created with weights exponential decay exponent of 1.4 (`EMwmean.decay` argument). The ensemble has good performance statistics over the evaluation dataset.
+The ensemble is calculated by weight averaging the models based on their AUC score (function `biomod2::BIOMOD_EnsembleModeling`). First, models with low performances (AUC < 0.7, `metric.select.thresh` agument) are removed. Then, a weighted mean of models is created with weights exponential decay exponent of 1.4 (`EMwmean.decay` argument).
 ```{r calculate ensemble, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Model ensemble models
 myBiomodEM <- BIOMOD_EnsembleModeling(
@@ -603,6 +604,13 @@ get_evaluations(myBiomodEM) %>%
 
 ```
 
+After getting the ensemble done, its performances can be checked.
+```{r calculate ensemble performances, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Get ensemble performance scores
+get_evaluations(myBiomodEM) %>% 
+  dplyr::select(metric.eval, calibration, evaluation)
+
+```
 
 ## 3.6 Partial dependency plots and variables importances
 
@@ -649,7 +657,7 @@ pdp_df$tab %>%
 
 Models can be projected to map the results in a geographic space. First single models are projected (`biomod2::BIOMOD_Projection`), then the ensemble result is calculated again based on the output (`biomod2::BIOMOD_EnsembleForecasting`). Here, the single models and the ensemble are projected to the original environmental covariates layers to generate a distribution map.   
 
-```{r project ensemble, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+```{r project ensemble, message = FALSE, results = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Project single models
 myBiomodProj <- BIOMOD_Projection(
   bm.mod = myBiomodModelOut,
@@ -707,8 +715,7 @@ ggplot() +
 
 ## 4. Conclusions
 
-It's amazing!
-
+The implemented workflow is general and can be used for different species in different geographic context with little modifications.
 
 # References
 
@@ -729,6 +736,13 @@ Da Re, D., Tordoni, E., Lenoir, J., Lembrechts, J. J., Vanwambeke, S. O., Rocchi
 Brun, P., Thuiller, W., Chauvier, Y., Pellissier, L., Wüest, R. O., Wang, Z., & Zimmermann, N. E. (2020). Model complexity affects species distribution projections under climate change. Journal of Biogeography, 47(1), 130-142.
 
 Hirzel, A. H., Le Lay, G., Helfer, V., Randin, C., & Guisan, A. (2006). Evaluating the ability of habitat suitability models to predict species presences. Ecological modelling, 199(2), 142-152.
+
+
+\newpage
+# Appendix A: R session information
+```{r get session info, message=FALSE} 
+devtools::session_info()
+```
 
 
 
