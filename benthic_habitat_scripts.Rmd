@@ -12,7 +12,7 @@ knit: (function(input_file, encoding) {
 
 # Content
 
-This document is a step-by-step tutorial to fit Species Distribution Models (SDMs) for benthic organisms using the 'biomod2' package. The main steps of the tutorial will describe how to (1) pre-process the environmental data, (2) fit SDMs, (3) evaluate SDMs, and (4) project SDMs to generate distribution maps.
+This document is a step-by-step tutorial to fit Species Distribution Models (SDMs) for benthic organisms using the 'biomod2' package. The main steps of the tutorial will describe how to pre-process the environmental data, fit SDMs, evaluate SDMs, and project SDMs to generate habitat suitability maps.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -281,7 +281,8 @@ PA_dens_sf <- rbind(
   st_as_sf(coords = c(1,2), crs = crs(DataSpecies))
 
 # Plot PA1 
-plot(PA_dens_sf[PA_dens_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Density dependent PA1 set")
+plot(PA_dens_sf[PA_dens_sf$PA1 == TRUE,]["PA1"], 
+     pch = 20, main = "Density dependent PA1 set")
 
 ```
 
@@ -456,8 +457,7 @@ myBiomodData <- BIOMOD_FormatingData(
   dir.name = "models")
 
 # Plot formatted data
-plot(myBiomodData) + 
-  theme_minimal()
+plot(myBiomodData)
 
 ```
 
@@ -548,7 +548,7 @@ The procedure to calculate the variable importance is set to be repeated 3 times
 
 Another relevant argument is the evaluation metric (`metric.eval`). Here, four metrics are selected: the Area Under the Receiving Operating Curce (ROC), the Cohen's K (KAPPA), the Boyce's Index (BOYCE), and the True Skill Statistics (TSS). AUC, TSS, and KAPPA are widely used to assess the performance of classification algorithms. The Boyce's index is a presence only index and checks weather the model's output in terms of probability of occurrence (also known as Habitat Suitability Index) has higher values in correspondence of occurrence points (Hierzel et al., 2006)
 
-```{r fit single models, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+```{r fit single models, message = FALSE, collapse = TRUE, results=FALSE, width = 60, warning = FALSE}
 # Fit single models
   myBiomodModelOut <- BIOMOD_Modeling(
     bm.format = myBiomodData,
@@ -571,8 +571,7 @@ Performance metrics (AUC, KAPPA, BOYCE, TSS) are calculated for each model for t
 
 ```{r metrics scatterplots, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
 # Plot scatterplot calibration vs evaluation
-get_evaluations(myBiomodModelOut) %>%  
-  # dplyr::filter(metric.eval == "ACCURACY") %>%
+get_evaluations(myBiomodModelOut) %>% 
   ggplot() + 
   geom_point(aes(x = calibration, y = validation, color = algo)) + 
   facet_wrap(~metric.eval, scales = "free") + 
@@ -583,7 +582,7 @@ get_evaluations(myBiomodModelOut) %>%
 ## 3.5 Models Ensembling
 
 The ensemble is calculated by weight averaging the models based on their AUC score (function `biomod2::BIOMOD_EnsembleModeling`). First, models with low performances (AUC < 0.7, `metric.select.thresh` agument) are removed. Then, a weighted mean of models is created with weights exponential decay exponent of 1.4 (`EMwmean.decay` argument).
-```{r calculate ensemble, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+```{r calculate ensemble, message = FALSE, collapse = TRUE, results=FALSE, width = 60, warning = FALSE}
 # Model ensemble models
 myBiomodEM <- BIOMOD_EnsembleModeling(
   bm.mod = myBiomodModelOut,
@@ -597,11 +596,6 @@ myBiomodEM <- BIOMOD_EnsembleModeling(
   EMci.alpha = 0.05,
   EMwmean.decay = 1.4,
   do.progress = TRUE)
-
-# Get ensemble performance scores
-get_evaluations(myBiomodEM) %>% 
-  dplyr::select(metric.eval, calibration, evaluation)
-
 ```
 
 After getting the ensemble done, its performances can be checked.
@@ -713,7 +707,7 @@ ggplot() +
 
 ```
 
-## 4. Conclusions
+# 4. Conclusions
 
 The implemented workflow is general and can be used for different species in different geographic context with little modifications.
 
