@@ -38,7 +38,7 @@ The modeling approach used in this document is based on model ensembling, where 
 
 Additional dimensions of variability between the fitted models are the pseudoabsence data and the evaluation method: 
 
-* Since no independent evaluation dataset exists, cross validation has to be used to assess each model's performance. Here, 5-fold cross validation is used, and repeated three times with different randomized folds. A different strategy was used to assess the ensemble's performance, see below for more information.
+* Since no independent evaluation dataset exists, cross validation has to be used to assess each model's performance. Here, 5-fold cross validation is used, and repeated three times with different randomized folds. A spatial blocks approach is used to assess the ensemble performances over an independent dataset, see below for details. In short, first a training and an evaluation datasets are created based on spatial blocks. Then the training dataset is splitted using a 5-fold cross-validation approach where models are calibrated on 4 folds and validated on the remaining one. The performance of the models on the validation fold is giving relevant information on the ability of the single model to perform well on a separate dataset. However, the ensemble is built with all the models, and this contains information from all the training dataset. Thus, there is the need for an additional evaluation dataset.
 * Since no true absence data are available, an algorithm was used to randomly generate pseudo-absences (P-abs). The procedure was repeated three times to generate three P-abs sets used to fit the models. 
 
 In conclusion, a total number of: 4 (modeling algorithms) X 5 (cross-validation folds) X 3 (cross-validation repetitions) X 3 (P-abs datasets) = 180 models were fitted and used for the ensemble generation.
@@ -93,7 +93,6 @@ plot(myExpl)
 Some correlative methods perform poorly when correlated predictors are used. To retain a parsimonious subset of predictors for fitting the model and avoid overfitting, we performed a hierarchical cluster analysis based on a distance matrix, where we used 1 minus the absolute value of Spearman's correlation coefficient (1−|r|) as a measure of predictor's dissimilarity. We used the threshold of r = 0.7 to identify 17 clusters of predictors and retained one predictor for each cluster. 
 
 ```{r predictors dendrogram, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Calculate correlation between raster stack layers
 funcor = function(x,y){cor(x,y, method = "spearman", use = "complete.obs")}
 env_corr <- layerCor(myExpl, fun = funcor)
@@ -139,7 +138,6 @@ ggplot(segment(tree_data)) +
 Finally, the Variance Inflation Factor (VIF) was used to identify potentially collinear predictors. 
 
 ```{r predictors vif, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Check vifstep
 myExpl %>% 
   dplyr::select(
@@ -163,7 +161,6 @@ myExpl %>%
 The procedure resulted in a short list of 12 uncorrelated and non-collinear predictors which were used as covariates in the modeling procedure.
 
 ```{r predictors subselection, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Check vifstep
 myExpl <- myExpl %>% 
   dplyr::select(
@@ -189,7 +186,6 @@ myExpl <- myExpl %>%
 Occurrence points for _P. oceanica_ were retrieved from Chefaoui et al. (2017). The datasets contains 1140 georeferenced points. Considering the spatial resolution of CMS Mediterranean products, occurrences were pre-processed by retaining only one occurrence point per 4.5×4.5 km grid cell, resulting in 640 points used to fit the models. This procedure is referred to as rarefaction or thinning and is widely used to solve fine-scale autocorrelation in the data. Several libraries in R implement functions to perform this operation, for example the package `GeoThinneR`.
 
 ```{r read plot occurrences, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Check vifstep
 DataSpecies <- "input_data/Posidonia_oceanica_paper___snap.shp" %>%
   st_read(quiet = TRUE)
@@ -211,15 +207,14 @@ ggplot() +
 Some minor data pre-processing before starting. `biomod2` needs as input a matrix with coordinates and a vector with responsed (in this case, only occurrences are used, so the vector contains only ones).
 
 ```{r models setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
-  # Name of the species to model - for saving outputs
-  species_name <- "posidonia"
+# Name of the species to model - for saving outputs
+species_name <- "posidonia"
   
-  # Create matrix with xy position
-  dataXY <- DataSpecies %>% st_coordinates()
+# Create matrix with xy position
+dataXY <- DataSpecies %>% st_coordinates()
   
-  # Vector with 1 for presences
-  dataResp <- rep(1, nrow(dataXY))
+# Vector with 1 for presences
+dataResp <- rep(1, nrow(dataXY))
 
 ```
 
@@ -234,7 +229,6 @@ Occurrences data have a strong sampling bias towards the north-western part of t
 For this step first a kernel density is calculated using the function `spatstat.explore::density.ppp`. A value of `sigma = 1` is set to control the smoothness of the kernel density (the density should net be too smooth or too rugged).
 
 ```{r density pabs setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Create a mask that will be used for kernel density estimtate in spatstat
 mask <- myExpl$thetao_median > 0
 mask_df <- terra::as.data.frame(mask, na.rm = TRUE, xy=TRUE)
@@ -247,7 +241,8 @@ ppp_obs <- ppp(dataXY[,1], dataXY[,2], window = owin_obs )
 ppp_obs
 
 # Calculate points density
-density_obs <- spatstat.explore::density.ppp(ppp_obs, positive = TRUE, diggle = TRUE, sigma = 1)
+density_obs <- spatstat.explore::density.ppp(
+  ppp_obs, positive = TRUE, diggle = TRUE, sigma = 1)
 
 # Check density_obs summary
 summary(density_obs)
@@ -263,7 +258,6 @@ hist(density_obs, main = "Density histogram")
 P-abs are sampled based on the geographic distribution of the kernel density estimate. Here, n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). To sample P-abs, the function `spatstat.random::rpoispp` is used. This function by defaults returns the realization of a point process with the same intensity defined in the `lambda` argument. Thus the estimated density is scaled to have the expected number of P-abs returned. The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
 
 ```{r density pabs generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Decide number of density dependent pseudoabsences
 n_pa_dens <- 500
 
@@ -277,9 +271,12 @@ PA3_dens <- rpoispp(density_obs*adjust)
 
 # Transform to sf object
 PA_dens_sf <- rbind(
-  data.frame(x = PA1_dens$x, y = PA1_dens$y) %>% mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE),
-  data.frame(x = PA2_dens$x, y = PA2_dens$y) %>% mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
-  data.frame(x = PA3_dens$x, y = PA3_dens$y) %>% mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
+  data.frame(x = PA1_dens$x, y = PA1_dens$y) %>% 
+    dplyr::mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE),
+  data.frame(x = PA2_dens$x, y = PA2_dens$y) %>% 
+    dplyr::mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
+  data.frame(x = PA3_dens$x, y = PA3_dens$y) %>% 
+    dplyr::mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
   ) %>%
   st_as_sf(coords = c(1,2), crs = crs(DataSpecies))
 
@@ -293,7 +290,6 @@ plot(PA_dens_sf[PA_dens_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Density depen
 This P-abs set was generated based on a stratified sub-division of the environmental range. For this, classified the median temperature and salinity predictor layers were reclassified into three bins (splitting data at the 0.3 and 0.6 quantiles) of continuous values, re-grouped them into unique classes of temperature and salinity (n = 9 classes) and sampled an equal number of P-Abs for each combination. This method guarantees that all environmental strata were represented in the training dataset and reduces extrapolation errors at the edge of the species' environmental niche (Da Re et al. 2023; Descombes et al. 2022). 
 
 ```{r stratified pabs setup, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Number of stratified P-abs 
 n_pa_env <- 500
 
@@ -301,10 +297,14 @@ n_pa_env <- 500
 myExpl_class <- myExpl
 
 # reclassify each layer (function not vectorized -.-')
-breaks <- global(myExpl_class, quantile, probs=c(0, 0.33, 0.66, 1), na.rm=TRUE) %>% as.matrix()
+breaks <- global(myExpl_class, quantile, probs=c(0, 0.33, 0.66, 1), 
+                 na.rm=TRUE) %>% as.matrix()
 
 for (n in 1:length(names(myExpl_class))){
-  myExpl_class[[n]] <- classify(myExpl_class[[n]], rcl = as.vector(breaks[n,]), include.lowest=FALSE, brackets=TRUE )
+  myExpl_class[[n]] <- classify(myExpl_class[[n]], 
+                                rcl = as.vector(breaks[n,]), 
+                                include.lowest=FALSE,
+                                brackets=TRUE )
 }
 
 # Create unique classification
@@ -319,7 +319,6 @@ plot(myExpl_class$comb, main = "Environmental strata")
 P-abs are sampled using the custom function `stratified_pp_sampler_area`. This function samples an uniform point process for each environmental strata, where the number of P-abs per strata is proportional to its area. Here, n = 500 density-dependent P-abs are generated; for more stable results, a larger number should be used (e.g. n = 5.000). The random sampling process is repeated three times and the output is saved in an `sf` object for further processing.
 
 ```{r stratified pabs generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Sample environmentally stratified pseudoabsences
 PA1_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
 PA2_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
@@ -327,23 +326,26 @@ PA3_env <- stratified_pp_sampler_area(myExpl_class$comb, n_pa_env)
 
 # transform to sf object
 PA_env_sf <- rbind(
-  data.frame(x = PA1_env[,1], y = PA1_env[,2]) %>% mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE), 
-  data.frame(x = PA2_env[,1], y = PA2_env[,2]) %>% mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
-  data.frame(x = PA3_env[,1], y = PA3_env[,2]) %>% mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
+  data.frame(x = PA1_env[,1], y = PA1_env[,2]) %>% 
+    dplyr::mutate(PA1 = TRUE, PA2 = FALSE, PA3 = FALSE), 
+  data.frame(x = PA2_env[,1], y = PA2_env[,2]) %>% 
+    dplyr::mutate(PA1 = FALSE, PA2 = TRUE, PA3 = FALSE), 
+  data.frame(x = PA3_env[,1], y = PA3_env[,2]) %>%
+    dplyr::mutate(PA1 = FALSE, PA2 = FALSE, PA3 = TRUE) 
 ) %>%
   st_as_sf(coords = c(1,2), crs = crs(DataSpecies))
 
 # Check with a plot
-plot(PA_env_sf[PA_env_sf$PA1 == TRUE,]["PA1"], pch = 20, main = "Environmentally stratified PA1 set")
+plot(PA_env_sf[PA_env_sf$PA1 == TRUE,]["PA1"], 
+     pch = 20, main = "Environmentally stratified PA1 set")
 
 ```
 
 ### 3.1.3 P-abs dataset generation
 
-The data.frames with P-abs generated in the previous steps are merged and formatted in a biomod-friendly way that will be useful later. An `sf` object is also created, which hwill be useful for plotting.
+The data.frames with P-abs generated in the previous steps are merged and formatted in a biomod-friendly way that will be useful later. The biomod-friendly data are stored in the `PA.user.table` object. An `sf` object is also created, which will be useful for plotting.
 
 ```{r pabs dataset generation, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
-
 # Merge the two p-abs data.frames
 PA_full <- rbind(
   st_coordinates(PA_dens_sf) %>% data.frame() ,
@@ -358,7 +360,7 @@ resp <- c(dataResp, rep(NA, nrow(PA_full) ) )
 respXY <- rbind(dataXY, data.frame(X = PA_full$X, Y = PA_full$Y))
 
 # Create biomod-friendly data
- PA.user.table <- rbind( 
+PA.user.table <- rbind( 
    data.frame(PA1 = rep(TRUE, length(dataResp)),
               PA2 = rep(TRUE, length(dataResp)),
               PA3 = rep(TRUE, length(dataResp))),
@@ -366,43 +368,346 @@ respXY <- rbind(dataXY, data.frame(X = PA_full$X, Y = PA_full$Y))
    )
 
 # Create data frame for creating cross validation folds
- PA.user.table_sf <- st_as_sf(
+PA.user.table_sf <- st_as_sf(
    data.frame(respXY, "resp" = ifelse(is.na(resp), 0, 1), PA.user.table ),
    coords = c("X", "Y"),
-   crs = crs(my_Expl))
+   crs = crs(myExpl))
 
 
 ```
-
-
-
-
-
-
-
 
 ## 3.2 Spatial Blocks for Models Evaluation
 
 Then, a spatial block approach was used to split all the data (occurrences and P-abs) in a training (80 %) and evaluation (20 %) datasets. This procedure is needed because no independent evaluation dataset is available. The spatial blocks ensure that training and evaluation data are spatially distinct as much as possible, this testing the ensemble's ability to generalize over different geographic area. Spatial clusters were defined using a k-medoid approach (`cluster::pam` function: see Brun et al. 2020 for details on the method). The function `make_blocks` was developed by Philipp Brun and used in the Brun et al. (2020) paper. If this function is used, the Brun et al. (2020) paper must be cited.
 
+Here, the aim is to split the data into a training and evaluation datasets. Therefore, 5 folds are generated (`cv_param_nstrat`), one of them (fold with the smaller occurrence/P-abs ratio) will be assigned to the evaluation set and the four remaining to the training set. Each fold can contain points from 2 geographic clusters (`cv_param_nclusters`). 
 
+```{r spatial blocks definition, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Number of folds to create
+cv_param_nstrat <- 5
 
+# number of clusters from which the algorithm starts creating foldss
+cv_param_nclusters <- 10
 
+# Create blocks to split train and test folds and add to pa.user.table dataframe
+PA.user.table_sf$block <- make_blocks(
+  df = respXY, 
+  nstrat = cv_param_nstrat, 
+  nclusters = cv_param_nclusters, 
+  pres = ifelse(is.na(resp), 0, 1) )
+
+# Select fold to use for evaluation
+fold_eval <- PA.user.table_sf %>% 
+  group_by(block) %>% 
+  dplyr::summarize(
+    n_pres = sum(resp == 1),
+    n_abs = sum(resp == 0) ) %>%
+  dplyr::mutate(ratio = n_pres / n_abs) %>%
+  dplyr::slice( which.min( ratio ) ) %>%
+  dplyr::pull(block)
+  
+# Add train-evaluation label to PA.user.table_sf
+PA.user.table_sf <- PA.user.table_sf %>% 
+  dplyr::mutate(flag_train_eval = ifelse(block == fold_eval, "eval", "train"))
+  
+# Create train and evaluation dataset
+PA.user.table_sf_train <- PA.user.table_sf %>% 
+  dplyr::filter(block != fold_eval)
+PA.user.table_sf_eval <- PA.user.table_sf %>% 
+  dplyr::filter(block == fold_eval)
+  
+# Retain only PA from PA1 (for evaluation)
+PA.user.table_sf_eval <- PA.user.table_sf_eval %>%
+  dplyr::filter(PA1 == TRUE) %>%
+  dplyr::select(-PA1, -PA2, -PA3)
+  
+# Create PA user table for train data
+PA.user.table_train <- PA.user.table[ PA.user.table_sf$block != fold_eval ,]
+  
+# Format data for training
+resp_train <- resp[ PA.user.table_sf$block != fold_eval ]
+respXY_train <- respXY[ PA.user.table_sf$block != fold_eval , ]
+  
+# Format data for evaluation
+resp_eval <- PA.user.table_sf_eval$resp
+respXY_eval <- st_coordinates(PA.user.table_sf_eval)
+
+# Check the spatial blocks
+ggplot() + 
+  theme_minimal() + 
+  geom_sf(data = PA.user.table_sf, mapping = aes(color = as.factor(block))) + 
+  scale_color_discrete(name = "block") + 
+  theme(legend.position = "bottom")
+
+```
+The formatted data are then passed to the function `biomod2::BIOMOD_FormatingData`, that stores the data for the next steps. The data can be plotted for visual inspection. Although occurrences and P-abs are used for calibration, validation, and evaluation, the data are stored in a way that the P-abs used for evaluation are recognized as true absences. This is useful for keeping separated the two datasets. 
+
+```{r format biomod data, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Format biomod data
+myBiomodData <- BIOMOD_FormatingData(
+  expl.var = myExpl,
+  resp.name = species_name,
+  resp.var = resp_train,
+  resp.xy = respXY_train,
+  eval.resp.var = resp_eval,
+  eval.resp.xy = respXY_eval,
+  PA.strategy = 'user.defined',
+  PA.user.table = PA.user.table_train,
+  dir.name = "models")
+
+# Plot formatted data
+plot(myBiomodData)
+
+```
 
 ## 3.3 Models Calibration
 
+The models parametrization needs to be determined. Model's hyperparameters can affect the fitting capacity of the models and their ability to perform well when extrapolating to un-sampled environmental conditions. Here, intermediate complexity models were fitted to balance the fitting capacity with the ability to extrapolate to un-sampled environmental conditions, that is, to prevent overfitting. The guidelines in Brun et al. (2020) were followed. The custom options are: 
+ * GLMs were fitted with linear and quadratic terms;
+ * GAMs were fitted with a regularisation in the smooth term set to 3;
+ * RFs was fitted with a minimum size of terminal nodes set to 40 and 1000 trees;
+ * ANNs were fitted with 3 hidden layers and a decay of 0.1.
+
+```{r models parametrization, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Define options for single models
+  models.option <- list(
+
+    GLM.binary.stats.glm = list(
+      "_PA1_allRun" = list(
+        type = 'quadratic',
+        test = "AIC"),
+      "_PA2_allRun" = list(
+        type = 'quadratic',
+        test = "AIC") ,
+      "_PA3_allRun" = list(
+        type = 'quadratic',
+        test = "AIC")
+    ),
+
+    RF.binary.randomForest.randomForest = list(
+      "_PA1_allRun" = list(
+        do.classif = TRUE,
+        ntree = 500,
+        mtry = 2,
+        sampsize = c(30, 30),
+        replace = TRUE,
+        nodesize = 40),
+      "_PA2_allRun" = list(
+        do.classif = TRUE,
+        ntree = 500,
+        mtry = 2,
+        sampsize = c(30, 30),
+        replace = TRUE,
+        nodesize = 40),
+      "_PA3_allRun" = list(
+        do.classif = TRUE,
+        ntree = 500,
+        mtry = 2,
+        sampsize = c(30, 30),
+        replace = TRUE,
+        nodesize = 40)
+    ),
+
+    GAM.binary.mgcv.gam = list(
+      "_PA1_allRun" = list(
+        gamma = 3),
+      "_PA2_allRun" = list(
+        gamma = 3),
+      "_PA3_allRun" = list(
+        gamma = 3)
+    ),
+
+    ANN.binary.nnet.nnet = list(
+      "_PA1_allRun" = list(
+        size = 3,
+        decay = 0.05),
+      "_PA3_allRun" = list(
+        size = 3,
+        decay = 0.05),
+      "_PA3_allRun" = list(
+        size = 3,
+        decay = 0.05)
+    )
+  )
+
+  # Structure options for modelization
+  myBiomodOptions <- bm_ModelingOptions(
+    data.type = 'binary',
+    models = c("GLM", "RF", "GAM", "ANN"),
+    user.base = "bigboss",
+    strategy = "user.defined",
+    user.val = models.option,
+    bm.format = myBiomodData
+  )
+
+```
+The models were fitted using the function `biomod2::BIOMOD_Modeling`. Few options were specified here. In particular, the 5-fold cross validation was specified by setting `CV.strategy = "kfold"`, `CV.nb.rep = 3`, and `CV.k = 5`. The `biomod2` default setting of equal prevalence to presences and P-Abs was set with `prevalence = 0.5` (i.e., the sum of the presences weights equals the sum of P-Abs weights). This way, the influence of P-Abs in the calibration of each single model was kept constant, regardless of the number of presence points used for fitting.
+
+The procedure to calculate the variable importance was set to be repeated 3 times (`var.import = 3`). The algorithm calculates the importance of predictors in the models and in the ensemble using a permutation approach. Following this method, each predictor is randomly permuted one at a time and model predictions made accordingly. Each prediction is then compared with and without permutation using Pearson's correlation coefficient (ρ). Predictor importance was determined as 1−|ρ|. This process is repeated three times for each predictor, and the average variable importance is considered.
+
+Another relevant argument is the evaluation metric (`metric.eval`). Here, four metrics are selected: the Area Under the Receiving Operating Curce (ROC), the Cohen's K (KAPPA), the Boyce's Index (BOYCE), and the True Skill Statistics (TSS). AUC, TSS, and KAPPA are widely used to assess the performance of classification algorithms. The Boyce's index is a presence only index and checks weather the model's output in terms of probability of occurrence (also known as Habitat Suitability Index) has higher values in correspondence of occurrence points (Hierzel et al., 2006)
+
+```{r fit single models, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Fit single models
+  myBiomodModelOut <- BIOMOD_Modeling(
+    bm.format = myBiomodData,
+    OPT.user = myBiomodOptions,
+    modeling.id = 'AllModels',
+    models = c("GLM","RF", "GAM", "ANN"),
+    CV.strategy = "kfold",
+    CV.nb.rep = 3,
+    CV.k = 5,
+    var.import = 3,
+    metric.eval = c('ROC', "TSS", "KAPPA", "BOYCE"),
+    prevalence = 0.5,
+    do.progress = TRUE)
+
+```
+
+## 3.4 Models Evaluation
+
+Performance metrics (AUC, KAPPA, BOYCE, TSS) are calculated for each model for the calibration, validation, and evaluation data sets. For single models' assessment, the comparison can be done between calibration and validation metrics. This is done by plotting calibration vs validation metrics in a scatterplot. Values along the 1:1 line represent models with limited overfitting.
+
+```{r metrics scatterplots, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Plot scatterplot calibration vs evaluation
+get_evaluations(myBiomodModelOut) %>%  
+  # dplyr::filter(metric.eval == "ACCURACY") %>%
+  ggplot() + 
+  geom_point(aes(x = calibration, y = validation, color = algo)) + 
+  facet_wrap(~metric.eval, scales = "free") + 
+  geom_abline(intercept = 0, slope = 1) +
+  theme(aspect.ratio = 1)
+```
+
+## 3.5 Models Ensembling
+
+The ensemble is calculated by weight averaging the models based on their AUC score (function `biomod2::BIOMOD_EnsembleModeling`). First, models with low performances (AUC < 0.7, `metric.select.thresh` agument) are removed. Then, a weighted mean of models is created with weights exponential decay exponent of 1.4 (`EMwmean.decay` argument). The ensemble has good performance statistics over the evaluation dataset.
+```{r calculate ensemble, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Model ensemble models
+myBiomodEM <- BIOMOD_EnsembleModeling(
+  bm.mod = myBiomodModelOut,
+  models.chosen = 'all',
+  em.by = "all",
+  em.algo = 'EMwmean',
+  metric.select = 'ROC',
+  metric.select.thresh = 0.7,
+  metric.eval = c( 'ROC', "TSS", "KAPPA", "BOYCE"),
+  var.import = 3,
+  EMci.alpha = 0.05,
+  EMwmean.decay = 1.4,
+  do.progress = TRUE)
+
+# Get ensemble performance scores
+get_evaluations(myBiomodEM) %>% 
+  dplyr::select(metric.eval, calibration, evaluation)
+
+```
 
 
-## 3.4 Models Evaluation and Ensembling
+## 3.6 Partial dependency plots and variables importances
 
+Partial dependency plots show how the univariate model response to predictors when all other predictors are fixed to their median values (`biomod2::bm_PlotResponseCurves`). The variable importance score is also included (`biomod2::get_variables_importance`).  
 
+```{r pdps, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Calculate partial dependency plots
+pdp_df <- bm_PlotResponseCurves(
+  bm.out = myBiomodEM, 
+  models.chosen = get_built_models(myBiomodEM),
+  fixed.var = 'median',
+  do.progress = FALSE,
+  do.plot = FALSE)
 
-## 3.5 Models Projection 
+# get variable importances
+vimp_df <- get_variables_importance(myBiomodEM) %>% 
+  dplyr::rename(expl.name = expl.var)
 
+# Plot partial dependency plots
+pdp_df$tab %>% 
+  ggplot() + 
+  theme_bw() +
+  geom_line(aes(x = expl.val, y = pred.val ) ) +
+  facet_wrap(~expl.name, 
+             scales = "free_x", 
+             strip.position = "bottom", 
+             labeller = "label_parsed") +
+  ylab("Response")+
+  theme(strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.text = element_text( size = 12 ) ) +
+  geom_label(data = vimp_df, 
+             mapping = aes(x = Inf, y = Inf, label = round(var.imp,2) ),
+             hjust =  1, vjust = 1) +
+  ylim(0,1) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4))
 
+```
+
+## 3.7 Models Projection 
+
+Models can be projected to map the results in a geographic space. First single models are projected (`biomod2::BIOMOD_Projection`), then the ensemble result is calculated again based on the output (`biomod2::BIOMOD_EnsembleForecasting`). Here, the single models and the ensemble are projected to the original environmental covariates layers to generate a distribution map.   
+
+```{r project ensemble, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Project single models
+myBiomodProj <- BIOMOD_Projection(
+  bm.mod = myBiomodModelOut,
+  proj.name = "baseline",
+  new.env = myExpl,
+  models.chosen = 'all',
+  metric.binary = c( 'ROC', "TSS"),
+  metric.filter = 'all',
+  build.clamping.mask = FALSE, 
+  do.progress = FALSE)
+
+# Project ensemble models
+myBiomodEMProj <- BIOMOD_EnsembleForecasting(
+  bm.em = myBiomodEM,
+  bm.proj = myBiomodProj,
+  models.chosen = 'all',
+  metric.binary = c( 'ROC', "TSS", "KAPPA"),
+  metric.filter = 'all',
+  do.progress = FALSE)
+
+```
+
+The final map is a continuous index ranging from 0 to 1000 that can be interpreted as a probability of occurrence. The map can be binarized by selecting a threshold. Different options are available and here the threshold that balances sensitivity and specificity is used.  
+
+```{r plot projections, message = FALSE, collapse = TRUE, width = 60, warning = FALSE}
+# Plot projection hsi
+habitat_rast <- get_predictions(myBiomodEMProj) %>% 
+  terra::mask(myExpl[[1]])
+
+ggplot() +
+  theme_void()+
+  ggspatial::layer_spatial(habitat_rast, alpha = 0.7) +
+  scale_fill_viridis( na.value = NA,  name = "HSI") +
+  ggtitle("*P. oceanica* Habitat Suitability Index ") + 
+  theme(legend.position = c(0.90, 0.80),
+        legend.background = element_blank()) + 
+  theme(title = element_markdown())
+
+# Plot projection binarized
+habitat_rast_bin <- get_predictions(myBiomodEMProj, metric.binary = "TSS") %>% 
+  terra::mask(myExpl[[1]])
+
+ggplot() +
+  theme_void()+
+  ggspatial::layer_spatial(as.factor(habitat_rast_bin) , alpha = 0.7) +
+  scale_fill_manual( 
+    values = c("#E6B494", "#312A56"),
+    na.value = NA,  name = "Prediction", na.translate = FALSE ) +
+  ggtitle("*P. oceanica* binarized habitat") + 
+  theme(legend.position = c(0.90, 0.80),
+        legend.background = element_blank()) + 
+  theme(title = element_markdown())
+
+```
 
 ## 4. Conclusions
 
+It's amazing!
 
 
 # References
@@ -423,7 +728,7 @@ Da Re, D., Tordoni, E., Lenoir, J., Lembrechts, J. J., Vanwambeke, S. O., Rocchi
 
 Brun, P., Thuiller, W., Chauvier, Y., Pellissier, L., Wüest, R. O., Wang, Z., & Zimmermann, N. E. (2020). Model complexity affects species distribution projections under climate change. Journal of Biogeography, 47(1), 130-142.
 
-
+Hirzel, A. H., Le Lay, G., Helfer, V., Randin, C., & Guisan, A. (2006). Evaluating the ability of habitat suitability models to predict species presences. Ecological modelling, 199(2), 142-152.
 
 
 
